@@ -2,9 +2,13 @@ Revision history for Perl extension Google-BigQuery
 
 {{$NEXT}}
 
+1.04 2022-04-13T09:32:00Z
+
+    - Add auth by compute_engine_credentials
+
 1.02 2015-07-30T05:03:02Z
 
-    - Fix typo viersion number.
+    - Fix typo version number.
 
 1.0.1 2015-07-30T04:48:44Z
 

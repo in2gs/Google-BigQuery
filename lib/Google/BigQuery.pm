@@ -3,7 +3,7 @@ use 5.010001;
 use strict;
 use warnings;
 
-our $VERSION = "1.02";
+our $VERSION = "1.04";
 
 use Class::Load qw(load_class);
 use Crypt::OpenSSL::PKCS12;
@@ -27,11 +27,52 @@ sub create {
 sub new {
   my ($class, %args) = @_;
 
-  die "undefined client_eamil" if !defined $args{client_email};
-  die "undefined private_key_file" if !defined $args{private_key_file};
-  die "not found private_key_file" if !-f $args{private_key_file};
-
   my $self = bless { %args }, $class;
+
+  $self->_auth;
+  $self->_set_rest_description;
+
+  return $self;
+}
+
+sub DESTROY {
+}
+
+sub _fetch_compute_metadata
+{
+    my ($self, $uri) = @_;
+    my $response = $self->{ua}->get(
+      "http://metadata.google.internal$uri",
+      'Metadata-Flavor' => 'Google',
+    );
+    if ($response->is_success) {
+      return ($response->decoded_content);
+    } else {
+      die "request fail (http://metadata.google.internal$uri)";
+    }
+}
+
+sub _auth_by_compute_engine_credentials
+{
+  my($self) = @_;
+  $self->{scope} //= [qw(https://www.googleapis.com/auth/bigquery)];
+  $self->{exp} = time + 3600;
+  $self->{iat} = time;
+  $self->{ua} = LWP::UserAgent->new;
+
+  $self->{access_token} = decode_json($self->_fetch_compute_metadata('/computeMetadata/v1/instance/service-accounts/default/token?scopes=https://www.googleapis.com/auth/bigquery'));
+  $self->{exp} = time + $self->{access_token}{expires_in};
+
+  $self->use_project($self->_fetch_compute_metadata('/computeMetadata/v1/project/project-id'));
+}
+
+sub _auth_by_private_key_file
+{
+  my ($self) = @_;
+
+  die "undefined client_email" if !defined $self->{client_email};
+  die "undefined private_key_file" if !defined $self->{private_key_file};
+  die "not found private_key_file" if !-f $self->{private_key_file};
 
   $self->{GOOGLE_API_TOKEN_URI} = 'https://accounts.google.com/o/oauth2/token';
   $self->{GOOGLE_API_GRANT_TYPE} = 'urn:ietf:params:oauth:grant-type:jwt-bearer';
@@ -49,17 +90,6 @@ sub new {
     die "invalid private_key_file format";
   }
 
-  $self->_auth;
-  $self->_set_rest_description;
-
-  return $self;
-}
-
-sub DESTROY {
-}
-
-sub _auth {
-  my ($self) = @_;
 
   $self->{scope} //= [qw(https://www.googleapis.com/auth/bigquery)];
   $self->{exp} = time + 3600;
@@ -86,6 +116,16 @@ sub _auth {
   } else {
     my $error = decode_json($response->decoded_content);
     die $error->{error};
+  }
+}
+
+sub _auth {
+  my ($self) = @_;
+
+  if ($self->{client_email} && $self->{private_key_file}){
+    $self->_auth_by_private_key_file();
+  } else {
+    $self->_auth_by_compute_engine_credentials();
   }
 }
 
